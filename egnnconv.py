@@ -19,7 +19,7 @@ class EGNNConv(MessagePassing):
         Edge feature size; default is 0.
     """
     def __init__(self, in_size, hidden_size, out_size, edge_feat_size=0):
-        super(EGNNConv, self).__init__(aggr='mean')  # Use mean aggregation
+        super(EGNNConv, self).__init__()
 
         self.in_size = in_size
         self.hidden_size = hidden_size
@@ -73,31 +73,31 @@ class EGNNConv(MessagePassing):
 
         return x_out, pos_out
     
-    def message(self, x_i, x_j, pos_i, pos_j, edge_attr):
+    def message(self, x_j, x_i, pos_j, pos_i, edge_attr):
         # Compute coordinate differences and radial distances
         coord_diff = pos_i - pos_j
         radial = (coord_diff ** 2).sum(dim=-1, keepdim=True)
 
         # Concatenate features for edge MLP
         if edge_attr is not None:
-            edge_features = torch.cat([x_i, x_j, radial, edge_attr], dim=-1)
+            edge_features = torch.cat([x_j, x_i, radial, edge_attr], dim=-1)
         else:
-            edge_features = torch.cat([x_i, x_j, radial], dim=-1)
+            edge_features = torch.cat([x_j, x_i, radial], dim=-1)
 
         # Compute messages
         msg_h = self.edge_mlp(edge_features)
-        msg_x = self.coord_mlp(msg_h) * coord_diff / (radial.sqrt() + 1e-30)
+        coord_diff = coord_diff / (radial.sqrt() + 1e-30)
+        msg_x = self.coord_mlp(msg_h) * coord_diff
         return msg_h, msg_x
     
-    def aggregate(self, inputs, index, dim_size=None):
+    def aggregate(self, inputs, index):
         # Separate node and position messages
         msg_h, msg_x = inputs
 
         # Aggregate node features
-        h_neigh = scatter(msg_h, index, dim=self.node_dim, reduce='mean', dim_size=dim_size)
-
+        h_neigh = scatter(msg_h, index, reduce='sum')
         # Aggregate position updates
-        pos_neigh = scatter(msg_x, index, dim=self.node_dim, reduce='mean', dim_size=dim_size)
+        pos_neigh = scatter(msg_x, index, reduce='mean')
 
         return h_neigh, pos_neigh
     
